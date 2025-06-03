@@ -9,16 +9,16 @@ check_dependencies() {
         return
     fi
 
-    echo "🔧 初始化依赖中..."
+    echo " 初始化依赖中..."
     apt install -y curl jq qrencode
 
     if [ ! -f "$xray_bin" ]; then
-        echo "⏬ 安装 Xray 中..."
+        echo " 安装 Xray 中..."
         bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)"
     fi
 
     if [ ! -f "/etc/systemd/system/xray@.service" ]; then
-        echo "⚙️ 创建 systemd 多实例模板..."
+        echo " 创建 systemd 多实例模板..."
         cat > /etc/systemd/system/xray@.service <<EOF
 [Unit]
 Description=Xray Instance %i
@@ -40,26 +40,26 @@ EOF
 
     mkdir -p "$config_dir"
     touch "$flag_file"
-    echo "✅ 初始化完成"
+    echo " 初始化完成"
 }
 
 create_instance() {
-    echo "🔐 正在生成 UUID..."
+    echo " 正在生成 UUID..."
     uuid=$($xray_bin uuid)
-    echo "✅ UUID: $uuid"
+    echo " UUID: $uuid"
 
-    echo "🔐 正在生成 Reality 密钥对..."
+    echo " 正在生成 Reality 密钥对..."
     key_output=$($xray_bin x25519)
     private_key=$(echo "$key_output" | grep 'Private key' | awk '{print $3}')
     public_key=$(echo "$key_output" | grep 'Public key' | awk '{print $3}')
 
-    echo "✅ 私钥: $private_key"
-    echo "✅ 公钥: $public_key"
+    echo " 私钥: $private_key"
+    echo " 公钥: $public_key"
 
-    read -p "📦 端口号: " port
-    read -p "📦 shortId（可空）: " shortIds
-    read -p "📦 SNI（如 speed.cloudflare.com）: " sni
-    read -p "📦 域名（如 your.domain.com）: " domain
+    read -p " 端口号: " port
+    read -p " shortId（可空）: " shortIds
+    read -p " SNI（如 speed.cloudflare.com）: " sni
+    read -p " 域名（如 your.domain.com）: " domain
 
     last_index=$(ls $config_dir/*.json 2>/dev/null | grep -oP '\d+(?=\.json)' | sort -n | tail -1)
     new_index=$((last_index + 1))
@@ -114,17 +114,17 @@ create_instance() {
 }
 EOL
 
-    echo "🔁 启动实例 xray@$new_index"
+    echo " 启动实例 xray@$new_index"
     systemctl enable xray@"$new_index"
     systemctl restart xray@"$new_index"
 
     fp="chrome"
     echo ""
-    echo "✅ Reality 节点链接："
+    echo " Reality 节点链接："
     link="vless://$uuid@$domain:$port?encryption=none&flow=xtls-rprx-vision&security=reality&fp=$fp&sni=$sni&pbk=$public_key&sid=$shortIds&type=tcp&headerType=none&alpn=h2"
     echo "$link"
     echo ""
-    echo "📱 节点二维码："
+    echo " 节点二维码："
     echo "$link" | qrencode -t ANSIUTF8
     echo ""
 }
@@ -142,16 +142,16 @@ manage_instance() {
 
     case $action in
         1) systemctl status xray@"$index" ;;
-        2) systemctl restart xray@"$index"; echo "✅ 已重启 xray@$index" ;;
-        3) systemctl enable xray@"$index"; echo "✅ 已设置开机自启 xray@$index" ;;
-        4) systemctl stop xray@"$index"; echo "✅ 已停止 xray@$index" ;;
+        2) systemctl restart xray@"$index"; echo "已重启 xray@$index" ;;
+        3) systemctl enable xray@"$index"; echo "已设置开机自启 xray@$index" ;;
+        4) systemctl stop xray@"$index"; echo " 已停止 xray@$index" ;;
         5) echo "返回主菜单" ;;
-        *) echo "❌ 无效操作" ;;
+        *) echo " 无效操作" ;;
     esac
 }
 
 delete_instance() {
-    echo "🗑️ 现有实例："
+    echo "🗑 现有实例："
     for file in $(ls $config_dir/*.json 2>/dev/null | sort -V); do
         num=$(basename "$file" .json)
         echo "编号：$num"
@@ -163,10 +163,44 @@ delete_instance() {
         systemctl stop xray@"$choice"
         systemctl disable xray@"$choice"
         rm -f "$config_dir/$choice.json"
-        echo "✅ 实例 xray@$choice 已删除"
+        echo "实例 xray@$choice 已删除"
     else
-        echo "❌ 找不到该编号对应配置"
+        echo "找不到该编号对应配置"
     fi
+}
+
+uninstall_xray() {
+    echo "⚠️  即将卸载 Xray 及其相关组件..."
+    read -p "是否同时删除所有配置文件？[y/N]: " del_config
+
+    echo "停止所有 Xray 实例..."
+    systemctl stop 'xray@*' 2>/dev/null
+
+    echo "禁用所有 Xray 实例..."
+    systemctl disable 'xray@*' 2>/dev/null
+
+    echo "删除 systemd 模板..."
+    rm -f /etc/systemd/system/xray@.service
+    systemctl daemon-reload
+
+    echo "删除 Xray 可执行文件..."
+    rm -f "$xray_bin"
+
+    if [[ "$del_config" =~ ^[Yy]$ ]]; then
+        echo "删除配置文件目录 $config_dir ..."
+        rm -rf "$config_dir"
+    else
+        echo "保留配置文件目录 $config_dir"
+    fi
+
+    echo "可选：卸载依赖组件（curl、jq、qrencode）"
+    read -p "是否卸载这些依赖组件？[y/N]: " remove_deps
+    if [[ "$remove_deps" =~ ^[Yy]$ ]]; then
+        apt remove --purge -y curl jq qrencode
+        apt autoremove -y
+    fi
+
+    echo "✅ 卸载完成"
 }
 
 # 主菜单入口
@@ -174,18 +208,20 @@ check_dependencies
 
 while true; do
     echo ""
-    echo "🧰 Reality 多实例管理器"
+    echo " Reality 多实例管理器"
     echo "1. 创建新节点"
     echo "2. 管理已有实例（状态/重启/自启/停止）"
     echo "3. 删除实例"
-    echo "4. 退出"
+    echo "4. 卸载 Xray 与环境"
+    echo "5. 退出"
     read -p "请选择操作编号：" choice
 
     case $choice in
         1) create_instance ;;
         2) manage_instance ;;
         3) delete_instance ;;
-        4) echo "👋 再见！"; exit 0 ;;
-        *) echo "❌ 无效输入" ;;
+        4) uninstall_xray ;;
+        5) echo " 再见！"; exit 0 ;;
+        *) echo " 无效输入" ;;
     esac
 done
